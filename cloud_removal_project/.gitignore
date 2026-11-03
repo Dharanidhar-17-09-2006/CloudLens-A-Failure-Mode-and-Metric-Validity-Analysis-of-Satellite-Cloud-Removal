@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Data (datasets, satellite imagery)
+data/
+datasets/
+*.tif
+*.tiff
+*.jp2
+*.nc
+*.hdf
+*.h5
+*.npy
+*.npz
+*.zip
+*.tar
+*.tar.gz
+
+# Models / checkpoints
+checkpoints/
+weights/
+*.pth
+*.pt
+*.ckpt
+*.onnx
+*.safetensors
+
+# Outputs / logs
+outputs/
+results/
+runs/
+logs/
+wandb/
+lightning_logs/
+tensorboard/
+*.log
+
+# Secrets
+.env
+*.key
