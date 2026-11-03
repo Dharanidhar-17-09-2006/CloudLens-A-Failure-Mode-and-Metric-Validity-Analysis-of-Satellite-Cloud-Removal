@@ -1,0 +1,12 @@
+torch
+torchvision
+lpips
+scikit-image
+opencv-python
+numpy
+pillow
+pandas
+matplotlib
+tqdm
+kaggle
+huggingface_hub
