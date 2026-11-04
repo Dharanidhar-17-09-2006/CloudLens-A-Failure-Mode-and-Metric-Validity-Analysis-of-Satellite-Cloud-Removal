@@ -15,12 +15,14 @@ from real_diagnostics import probs
 from unet_inpaint import SmallUNetInpainter
 from rice_models import BigUNetInpainter
 from metrics import MetricEvaluator
+from dehaze_dcp import dehaze_dcp
 
 # name -> (architecture, input mode). "hole": cloud pixels replaced by white before the model (self-supervised models);
 # "raw": real cloudy pixels fed as-is (paired-supervised models).
 RICE_MODELS = {"rice_small": ("small", "hole"), "rice_big": ("big", "hole"), "rice_big_gan": ("big", "hole"),
                "paired_small": ("small", "raw"), "paired_big": ("big", "raw")}
 BASE = ["cloudy_as_is", "mean_fill", "nearest_neighbor", "telea_inpaint", "euro_unet"]
+EXTRA = ["dark_channel"]   # classical dehazer: uses the raw cloudy pixels, no mask
 
 
 def model_fill(net, device, cloudy, mask, mode="hole"):
@@ -60,7 +62,7 @@ def main():
     print("RICE-trained models found:", list(nets))
     evaluator = MetricEvaluator(use_lpips=True, device=device)
     rice1, rice2, splits = D.get_data()
-    methods = BASE + list(nets)
+    methods = BASE + EXTRA + list(nets)
 
     mrows, arows, shown = [], [], {}
     for dname, items, keys in (("RICE2", rice2, splits["RICE2"]["test"]), ("RICE1", rice1, splits["RICE1"]["test"])):
@@ -73,6 +75,7 @@ def main():
             o["euro_unet"] = o["unet"]
             for m in BASE:
                 outs[m].append(o[m])
+            outs["dark_channel"].append(dehaze_dcp(t["cloudy"]))
             for name, net in nets.items():
                 outs[name].append(model_fill(net, device, t["cloudy"], fm, modes[name]))
         for i, t in enumerate(tiles):
