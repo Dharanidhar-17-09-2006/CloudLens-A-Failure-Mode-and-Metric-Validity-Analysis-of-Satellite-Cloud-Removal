@@ -21,11 +21,12 @@ from dataset import EuroSATDataset
 from classifier import load_trained_classifier, NORM_MEAN, NORM_STD
 from cloud_simulation import CloudSimulator
 from inpainting_baselines import cloudy_as_is, mean_fill, telea_inpaint
-from dehaze_dcp import dehaze_dcp
+from dehaze_dcp import dehaze_dcp, dehaze_dcp_masked
 
 ALPHAS = [0.2, 0.35, 0.5, 0.65, 0.8, 0.95, 1.0]
 METHODS = {"cloudy_as_is": lambda c, m: cloudy_as_is(c, m), "mean_fill": mean_fill,
-           "telea_inpaint": telea_inpaint, "dark_channel": lambda c, m: dehaze_dcp(c)}
+           "telea_inpaint": telea_inpaint, "dark_channel": lambda c, m: dehaze_dcp(c),
+           "dark_channel_masked": dehaze_dcp_masked}
 
 
 def apply_opacity(clean, mask, alpha, rng):
@@ -94,7 +95,7 @@ def main():
 
     df = pd.DataFrame(rows)
     out = Path("cloud_removal_project/results"); out.mkdir(parents=True, exist_ok=True)
-    df.to_csv(out / "opacity_sweep.csv", index=False)
+    df.to_csv(out / "opacity_sweep_v2.csv", index=False)
 
     fig, axs = plt.subplots(1, 3, figsize=(15, 4))
     for ax, (metric, label) in zip(axs, [("lpips", "LPIPS (lower = better)"),
@@ -107,7 +108,7 @@ def main():
     axs[0].legend()
     fig.suptitle(f"Opacity sweep, EuroSAT, {int(args.bin_lo * 100)}-{int(args.bin_hi * 100)}% coverage, n={len(X)}")
     fig.tight_layout()
-    fig.savefig(out / "opacity_sweep.png", dpi=150)
+    fig.savefig(out / "opacity_sweep_v2.png", dpi=150)
 
     pd.set_option("display.width", 200)
     for metric in ["lpips", "psnr_mask", "accuracy"]:

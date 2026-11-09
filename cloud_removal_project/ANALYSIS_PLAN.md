@@ -44,3 +44,12 @@ Three seeds (0, 1, 2). Each seed retrains every classifier. The fill-aware train
 - SEN12MS-CR labels are MODIS-derived (500 m), so they are coarse.
 - RICE has no land-cover labels; its results are a proxy only.
 - The recommendation depends on the classifier used.
+
+## Amendment 1: SEN12MS-CR tile construction (written before any SEN12MS-CR run)
+- RGB bands B4, B3, B2; reflectance / 3000 clipped to [0, 1], stored as 8-bit.
+- Cloud mask = estimate: cloudy RGB-mean brighter than the cloud-free RGB-mean by more than 0.05 reflectance, 3x3 opening. Cloudy and clear images are different dates, so surface change can enter the mask and cloud shadows are missed.
+- Tiles: four non-overlapping 64x64 crops per 256x256 patch, native 10 m.
+- Labels: simplified IGBP (10 classes). One label per tile = dominant class; the tile is kept only if that class covers at least 70% of the tile and at least 90% of its pixels are valid.
+- Split by (season, scene) hash, 70/10/20, so neighbouring patches never straddle splits. Test tiles are excluded from classifier training, fill-aware training and any encoder pretraining.
+- Classes differ from EuroSAT, so classifiers for this test are trained on SEN12MS-CR train tiles (ImageNet ResNet-18, same recipe as the EuroSAT runs). EuroSAT classifiers are not reused.
+- Test tiles are binned by estimated coverage (10-30, 30-60, 60-80%). SEN12MS-CR clouds are a mix of thin and thick, so results are not directly comparable to the thick-cloud EuroSAT results.

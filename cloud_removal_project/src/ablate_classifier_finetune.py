@@ -9,10 +9,11 @@ Training modes: clean (no clouds) and mask_aware (80% of samples get random shap
 Evaluation (EuroSAT test subset, thick synthetic clouds from the held-out cloud-mask
 family, per coverage bin): clean, cloudy, masked_zero, mean_fill, telea.
 
-Run:  python cloud_removal_project/src/ablate_classifier_finetune.py
+Run:  python cloud_removal_project/src/ablate_classifier_finetune.py --seed 0   (also --seed 1, --seed 2)
+v2: adds nearest_neighbor and unet inputs, keeps the best-validation epoch, one CSV per seed.
 Quick test:  python cloud_removal_project/src/ablate_classifier_finetune.py --epochs 1 --max_train 3000 --n_test 500
 """
-import argparse, time
+import argparse, copy, time
 from pathlib import Path
 import numpy as np, pandas as pd, torch, torch.nn as nn
 from PIL import Image
@@ -20,7 +21,8 @@ from PIL import Image
 from dataset import EuroSATDataset
 from classifier import get_classifier, NORM_MEAN, NORM_STD
 from cloud_simulation import CloudSimulator
-from inpainting_baselines import masked_input, mean_fill, telea_inpaint
+from inpainting_baselines import masked_input, mean_fill, nearest_neighbor_fill, telea_inpaint
+from unet_inpaint import SmallUNetInpainter
 
 BINS = {"10-30%": (0.10, 0.30), "30-60%": (0.30, 0.60), "60-80%": (0.60, 0.80)}
 REGIMES = {
@@ -28,7 +30,7 @@ REGIMES = {
     "layer4": dict(train=["layer4", "fc"], lr=1e-3),
     "full": dict(train=None, lr=3e-4),
 }
-INPUTS = ["clean", "cloudy", "masked_zero", "mean_fill", "telea"]
+INPUTS = ["clean", "cloudy", "masked_zero", "mean_fill", "nearest_neighbor", "telea", "unet"]
 
 
 def load_split(csv, n=None, seed=0):
@@ -39,21 +41,36 @@ def load_split(csv, n=None, seed=0):
     return X, ds.df["label"].astype(int).values
 
 
-def build_eval_sets(X, sim):
+@torch.no_grad()
+def unet_fill(unet, cloudy, masks, dev, bs=256):
+    out = []
+    for i in range(0, len(cloudy), bs):
+        x = torch.from_numpy(cloudy[i:i + bs]).to(dev).permute(0, 3, 1, 2).float() / 255.0
+        m = torch.from_numpy(masks[i:i + bs]).to(dev).unsqueeze(1).float()
+        o = unet(x, m).permute(0, 2, 3, 1).cpu().numpy() * 255.0
+        out.append(o.clip(0, 255).astype(np.uint8))
+    return np.concatenate(out)
+
+
+def build_eval_sets(X, sim, unet, dev):
     """Per bin: dict input_type -> uint8 array. Seeds differ from classifier-training mask seeds."""
     sets = {}
     for bi, (bname, brange) in enumerate(BINS.items()):
-        d = {k: [] for k in INPUTS}
+        d = {k: [] for k in INPUTS if k != "unet"}
+        masks = []
         for idx, img in enumerate(X):
             rng = np.random.default_rng(42 + idx * 10 + bi)
             mask = sim.generate_cloud_mask(brange, rng=rng)
             cloudy, _ = sim.apply_cloud(img, mask, condition="thick", rng=rng)
+            masks.append(mask)
             d["clean"].append(img)
             d["cloudy"].append(cloudy)
             d["masked_zero"].append(masked_input(cloudy, mask, 0))
             d["mean_fill"].append(mean_fill(cloudy, mask))
+            d["nearest_neighbor"].append(nearest_neighbor_fill(cloudy, mask))
             d["telea"].append(telea_inpaint(cloudy, mask))
         sets[bname] = {k: np.stack(v) for k, v in d.items()}
+        sets[bname]["unet"] = unet_fill(unet, sets[bname]["cloudy"], np.stack(masks), dev)
     return sets
 
 
@@ -83,7 +100,7 @@ def set_train_mode(model, spec):
             getattr(model, name).train()
 
 
-def train_one(regime, mode, Xtr, ytr, Xva, yva, mask_pool, args, dev, prep):
+def train_one(regime, mode, Xtr, ytr, Xva, yva, Xva_m, mask_pool, args, dev, prep):
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
     spec = REGIMES[regime]
@@ -95,6 +112,7 @@ def train_one(regime, mode, Xtr, ytr, Xva, yva, mask_pool, args, dev, prep):
     Xt = torch.from_numpy(Xtr).to(dev)
     yt = torch.from_numpy(ytr).long().to(dev)
     N = len(Xt)
+    best_score, best_state = -1.0, None
     for ep in range(1, args.epochs + 1):
         t0 = time.time()
         set_train_mode(model, spec)
@@ -120,7 +138,13 @@ def train_one(regime, mode, Xtr, ytr, Xva, yva, mask_pool, args, dev, prep):
             loss.backward()
             opt.step()
         va = accuracy(model, Xva, yva, prep, dev)
-        print(f"  [{regime}/{mode}] epoch {ep}/{args.epochs} ({time.time() - t0:.0f}s) clean val acc {va:.4f}")
+        vm = accuracy(model, Xva_m, yva, prep, dev)
+        score = va if mode == "clean" else vm  # select the epoch on the condition the model was trained for
+        if score > best_score:
+            best_score, best_state = score, copy.deepcopy(model.state_dict())
+        print(f"  [{regime}/{mode}] epoch {ep}/{args.epochs} ({time.time() - t0:.0f}s) "
+              f"clean val {va:.4f} | masked val {vm:.4f}")
+    model.load_state_dict(best_state)  # best-validation epoch, not the last one
     return model
 
 
@@ -145,14 +169,20 @@ def main():
     sim = CloudSimulator(64, 64)
     mrng = np.random.default_rng(1234)  # held-out shape-mask family, as in the existing mask-aware classifier
     mask_pool = {b: np.stack([sim.generate_shape_mask(r, rng=mrng) for _ in range(1500)]) for b, r in BINS.items()}
-    eval_sets = build_eval_sets(Xte, sim)
+    unet = SmallUNetInpainter().to(dev)
+    unet.load_state_dict(torch.load("cloud_removal_project/models/unet_inpaint.pth", map_location=dev))
+    unet.eval()
+    eval_sets = build_eval_sets(Xte, sim, unet, dev)
     prep = make_prep(dev)
+    vr = np.random.default_rng(99)  # masked validation set (30-60%, held-out shape family) for epoch selection
+    vpool = mask_pool["30-60%"][vr.integers(len(mask_pool["30-60%"]), size=len(Xva))]
+    Xva_m = (Xva * (1 - vpool[..., None])).astype(np.uint8)
 
     rows = []
     for regime in REGIMES:
         for mode in ["clean", "mask_aware"]:
             print(f"\n=== {regime} / {mode} ===")
-            model = train_one(regime, mode, Xtr, ytr, Xva, yva, mask_pool, args, dev, prep)
+            model = train_one(regime, mode, Xtr, ytr, Xva, yva, Xva_m, mask_pool, args, dev, prep)
             for bname in BINS:
                 for inp in INPUTS:
                     if inp == "clean" and bname != "10-30%":
@@ -166,13 +196,14 @@ def main():
 
     df = pd.DataFrame(rows)
     out = Path("cloud_removal_project/results"); out.mkdir(parents=True, exist_ok=True)
-    df.to_csv(out / "classifier_ablation.csv", index=False)
+    out_csv = out / f"classifier_ablation_v2_seed{args.seed}.csv"  # one file per seed, no renaming needed
+    df.to_csv(out_csv, index=False)
     pd.set_option("display.width", 200)
     for b in ["all"] + list(BINS):
         sub = df[df["bin"] == b]
         print(f"\n=== accuracy, coverage bin: {b} ===")
         print(sub.pivot_table(index=["regime", "train_mode"], columns="input", values="acc").round(3).to_string())
-    print(f"\nSaved to {out / 'classifier_ablation.csv'}")
+    print(f"\nSaved to {out_csv}")
 
 
 if __name__ == "__main__":
