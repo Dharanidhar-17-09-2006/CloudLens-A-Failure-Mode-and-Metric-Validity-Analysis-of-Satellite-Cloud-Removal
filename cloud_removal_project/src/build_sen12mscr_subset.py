@@ -68,7 +68,7 @@ CLASS_NAMES = [
     "Croplands", "Urban", "Snow/Ice", "Barren", "Water",
 ]
 
-SCALE = 3000.0
+SCALE = 0.3  # reflectance value mapped to 255
 CROPS = [(32, 32), (32, 160), (160, 32), (160, 160)]
 TILE = 64
 CHECKPOINT_INTERVAL = 50
