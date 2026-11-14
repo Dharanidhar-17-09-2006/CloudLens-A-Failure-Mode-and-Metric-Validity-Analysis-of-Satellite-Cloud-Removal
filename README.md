@@ -39,8 +39,8 @@ One folder, `cloudlens_assets`, with three subfolders. It is provided as **`clou
 | `results/` | Stored experiment outputs (CSV files) that the notebook displays: three-seed accuracy, metric-validity tiles, opacity sweep, RICE evaluation, manual failure audit, transfer learning |
 
 Links (fill these in before submitting):
-- Colab notebook: `<COLAB_NOTEBOOK_URL>`
-- Assets ZIP: `<DRIVE_LINK_TO_cloudlens_assets.zip>` (the Drive file ID is already configured in Section 0; the ZIP is also uploaded separately on Moodle)
+- Colab notebook: `https://colab.research.google.com/drive/1JLVZQq4ZisyiZscREWG-ItBilwyWqkNM`
+- Assets ZIP: `https://drive.google.com/file/d/13w8ELUKSMXNHJdt99O8h09e-9Nkg4Cuc/view?usp=drive_link` (the Drive file ID is already configured in Section 0; the ZIP is also uploaded separately on Moodle)
 
 ### Run on Google Colab (recommended)
 
